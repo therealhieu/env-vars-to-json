@@ -30,7 +30,10 @@ impl From<String> for Error {
 
 #[derive(Debug, Builder)]
 pub struct EnvVarsToJson {
+    #[builder(default, setter(into, strip_option))]
     pub prefix: Option<String>,
+
+    #[builder(default = "String::from(\"__\")", setter(into))]
     pub separator: String,
 }
 
@@ -125,6 +128,10 @@ impl From<&String> for JsonIndex {
 }
 
 impl EnvVarsToJson {
+    pub fn builder() -> EnvVarsToJsonBuilder {
+        EnvVarsToJsonBuilder::default()
+    }
+
     /// Examples:
     ///
     /// Given environemnt variables, with prefix `PREFIX` and separator `__`:
@@ -152,6 +159,7 @@ impl EnvVarsToJson {
         self.parse_iter(env::vars())
     }
 
+    /// Preprocess environment variables by filtering and sorting them
     fn preprocess_vars(
         &self,
         vars: impl Iterator<Item = (String, String)>,
@@ -177,6 +185,7 @@ impl EnvVarsToJson {
         Ok(vars)
     }
 
+    /// Parse iterator of String tuples into json
     pub fn parse_iter(&self, vars: impl Iterator<Item = (String, String)>) -> Result<Value, Error> {
         let vars = self.preprocess_vars(vars)?;
         let mut json = json!({});
@@ -270,6 +279,7 @@ impl EnvVarsToJson {
         Ok(json)
     }
 
+    /// Get mutable reference to json value at indices
     pub fn json_get_mut<'a>(
         json: &'a mut Value,
         indices: &'a [JsonIndex],
@@ -319,6 +329,12 @@ mod tests {
                 .map(|(k, v)| (k.to_string(), v.to_string()))
         }
 
+        pub fn set_vars(&self) {
+            for (k, v) in self.env_vars.iter() {
+                std::env::set_var(k, v);
+            }
+        }
+
         pub fn assert(&self, actual: &serde_json::Value) {
             let expected = serde_json::from_str::<serde_json::Value>(&self.expected)
                 .expect("failed to parse expected json");
@@ -328,10 +344,14 @@ mod tests {
 
     impl From<&TestCase<'_>> for EnvVarsToJson {
         fn from(test_case: &TestCase) -> Self {
-            Self {
-                prefix: test_case.prefix.map(|s| s.to_string()),
-                separator: test_case.separator.to_string(),
+            let mut builder = EnvVarsToJson::builder();
+            builder.separator(test_case.separator);
+
+            if let Some(prefix) = test_case.prefix {
+                builder.prefix(prefix);
             }
+
+            builder.build().expect("failed to build EnvVarsToJson")
         }
     }
 
@@ -443,10 +463,60 @@ mod tests {
           }
     "#
     )]
-    fn test_parse_env_vars(#[case] test_yaml: &'static str) -> Result<(), Error> {
+    fn test_parse_iter(#[case] test_yaml: &'static str) -> Result<(), Error> {
         let test_case = TestCase::from_yaml(test_yaml);
         let env_vars_to_json = EnvVarsToJson::from(&test_case);
         let actual = env_vars_to_json.parse_iter(test_case.vars())?;
+        test_case.assert(&actual);
+
+        Ok(())
+    }
+
+    #[rstest]
+    #[case(
+        r#"
+        prefix: PREFIX__
+        separator: "__"
+        env_vars:
+            PREFIX__INT_LIST__0: "1"
+            PREFIX__INT_LIST__1: "2"
+            PREFIX__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRING: "string"
+            PREFIX__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__STRUCT__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRUCT__STRING: "string"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__BOOL_LIST__3: "true"
+            PREFIX__STRUCT__FLOAT: "1.1"
+            PREFIX__BOOL_LIST__0: "false"
+            PREFIX__STRING_LIST__0: "string0"
+        expected: |
+          {
+            "int_list": [1, 2],
+            "struct": {
+              "int": 1,
+              "float": 1.1,
+              "string": "string",
+              "bool_list": [true, false],
+              "struct": {
+                "int": 1,
+                "string": "string",
+                "bool_list": [true, false]
+              }
+            },
+            "bool_list": [false, null, null, true],
+            "string_list": ["string0"]
+          }
+    "#
+    )]
+    fn test_parse_from_env(#[case] test_yaml: &'static str) -> Result<(), Error> {
+        let test_case = TestCase::from_yaml(test_yaml);
+        test_case.set_vars();
+        let env_vars_to_json = EnvVarsToJson::from(&test_case);
+        let actual = env_vars_to_json.parse_from_env()?;
+        println!("{}", serde_json::to_string_pretty(&actual).unwrap());
         test_case.assert(&actual);
 
         Ok(())

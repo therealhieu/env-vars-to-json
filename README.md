@@ -1,5 +1,5 @@
 # env-vars-to-json: Construct serde_json::Value from environment variables
-## Introduction
+
 This crate provides a method to construct `serde_json::Value` from environment variables.
 
 Examples:
@@ -11,7 +11,15 @@ export PREFIX__INT_LIST__1=2
 export PREFIX__STRUCT__INT=1
 export PREFIX__STRUCT__STRING=string
 export PREFIX__STRUCT__BOOL_LIST__0=true
-export PREFIX__STRUCT__BOOL_LIST__1=false 
+export PREFIX__STRUCT__BOOL_LIST__1=false
+export PREFIX__STRUCT__STRUCT__INT=1
+export PREFIX__STRUCT__STRUCT__STRING=string
+export PREFIX__STRUCT__STRUCT__BOOL_LIST__0=true
+export PREFIX__STRUCT__STRUCT__BOOL_LIST__1=false
+export PREFIX__BOOL_LIST__3=true
+export PREFIX__STRUCT__FLOAT=1.1
+export PREFIX__BOOL_LIST__0=false
+export PREFIX__STRING_LIST__0=string0
 ```
 
 Ouptut json:
@@ -20,9 +28,17 @@ Ouptut json:
   "int_list": [1, 2],
   "struct": {
     "int": 1,
+    "float": 1.1,
     "string": "string",
-    "bool_list": [true, false]
-  }
+    "bool_list": [true, false],
+    "struct": {
+      "int": 1,
+      "string": "string",
+      "bool_list": [true, false]
+    }
+  },
+  "bool_list": [false, null, null, true],
+  "string_list": ["string0"]
 }
 ```
 
@@ -35,8 +51,15 @@ let json = EnvVarsToJson::builder()
     .separator("__")
     .build()
     .expect("Failed to build EnvVarsToJson")
-    .parse()
+    .parse_from_env()
     .expect("Failed to parse environment variables");
 
-println!("{}", json.to_string());
+println!("{}", json);
 ```
+
+## License
+Licensed under either of
+ * Apache License, Version 2.0
+   ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0)>
+ * MIT license
+   ([LICENSE-MIT](LICENE-MIT) or <http://opensource.org/licenses/MIT)>
