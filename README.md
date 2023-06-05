@@ -1,4 +1,5 @@
 # env-vars-to-json: Construct serde_json::Value from environment variables
+[![CI](https://github.com/therealhieu/env-vars-to-json/actions/workflows/ci.yml/badge.svg)](https://github.com/therealhieu/env-vars-to-json/actions/workflows/ci.yml)
 
 This crate provides a method to construct `serde_json::Value` from environment variables.
 
