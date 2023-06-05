@@ -12,6 +12,7 @@ edition = "2021"
 
 [dependencies]
 derive_builder = "0.12.0"
+regex = { version = "1.8.3", optional = true }
 serde_json = "1.0.96"
 thiserror = "1.0.40"
 
@@ -19,3 +20,14 @@ thiserror = "1.0.40"
 rstest = "0.17.0"
 serde = { version = "1.0.163", features = ["derive"] }
 serde_yaml = "0.9.21"
+
+[features]
+filter = ["dep:regex"]
+preserve_order = ["serde_json/preserve_order"]
+
+# docs.rs-specific configuration
+[package.metadata.docs.rs]
+# document all features
+all-features = true
+# defines the configuration attribute `docsrs`
+rustdoc-args = ["--cfg", "docsrs"]
