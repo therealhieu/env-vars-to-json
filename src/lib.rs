@@ -28,13 +28,20 @@ impl From<String> for Error {
     }
 }
 
+/// Parse environment variables into json
 #[derive(Debug, Builder)]
 pub struct EnvVarsToJson {
+    /// The prefix to use when parsing environment variables
     #[builder(default, setter(into, strip_option))]
     pub prefix: Option<String>,
 
+    /// The separator to use when parsing environment variables
     #[builder(default = "String::from(\"__\")", setter(into))]
     pub separator: String,
+
+    /// The json object to merge the parsed environment variables into
+    #[builder(default = "serde_json::json!({})")]
+    pub json: Value,
 }
 
 impl Default for EnvVarsToJson {
@@ -42,12 +49,14 @@ impl Default for EnvVarsToJson {
         Self {
             prefix: None,
             separator: "__".to_string(),
+            json: json!({}),
         }
     }
 }
 
 type ArrayIndex = usize;
 
+/// A part of a json path which can be either an object or an array item
 #[derive(Debug)]
 pub enum PartValue {
     Object(Value),
@@ -85,6 +94,7 @@ impl ArrayItem {
     }
 }
 
+/// Index/key of a array/object
 #[derive(Debug, Clone)]
 pub enum JsonIndex {
     String(String),
@@ -188,7 +198,7 @@ impl EnvVarsToJson {
     /// Parse iterator of String tuples into json
     pub fn parse_iter(&self, vars: impl Iterator<Item = (String, String)>) -> Result<Value, Error> {
         let vars = self.preprocess_vars(vars)?;
-        let mut json = json!({});
+        let mut json = self.json.clone();
 
         for (key, env_value) in vars {
             let key_parts = key
@@ -242,13 +252,19 @@ impl EnvVarsToJson {
                                 obj.insert(k.clone(), v.clone());
                             }
                             Value::Null => *curr_part_value = value,
+                            Value::Number(_) => *curr_part_value = value,
+                            Value::String(_) => *curr_part_value = value,
+                            Value::Bool(_) => *curr_part_value = value,
                             _ => panic!("Unexpected value: {:?}", curr_part_value),
                         },
                         PartValue::ArrayItem(array_item) => {
-                            curr_part_value
-                                .as_array_mut()
-                                .ok_or("Expected array")?
-                                .insert(array_item.index, array_item.value);
+                            let arr = curr_part_value.as_array_mut().ok_or("Expected array")?;
+
+                            if array_item.index >= arr.len() {
+                                arr.resize_with(array_item.index + 1, || Value::Null);
+                            }
+
+                            arr[array_item.index] = array_item.value;
                         }
                     };
                     break;
@@ -314,6 +330,7 @@ mod tests {
     struct TestCase<'a> {
         prefix: Option<&'a str>,
         separator: &'a str,
+        json: Option<String>,
         env_vars: HashMap<&'a str, &'a str>,
         expected: String,
     }
@@ -349,6 +366,10 @@ mod tests {
 
             if let Some(prefix) = test_case.prefix {
                 builder.prefix(prefix);
+            }
+
+            if let Some(json) = &test_case.json {
+                builder.json(serde_json::from_str(json).expect("failed to parse json"));
             }
 
             builder.build().expect("failed to build EnvVarsToJson")
@@ -464,6 +485,143 @@ mod tests {
     "#
     )]
     fn test_parse_iter(#[case] test_yaml: &'static str) -> Result<(), Error> {
+        let test_case = TestCase::from_yaml(test_yaml);
+        let env_vars_to_json = EnvVarsToJson::from(&test_case);
+        let actual = env_vars_to_json.parse_iter(test_case.vars())?;
+        test_case.assert(&actual);
+
+        Ok(())
+    }
+
+    #[rstest]
+    #[case(
+        r#"
+        prefix: PREFIX__
+        separator: "__"
+        json: |
+            {
+                "int_list": [1]
+            }
+        env_vars:
+            PREFIX__INT_LIST__1: "2"
+        expected: |
+            {
+                "int_list": [1, 2]
+            }
+        "#
+    )]
+    #[case(
+        r#"
+        prefix: PREFIX__
+        separator: "__"
+        json: |
+            {
+                "int_list": [1, 0, 3]
+            }
+        env_vars:
+            PREFIX__INT_LIST__1: "2"
+        expected: |
+            {
+                "int_list": [1, 2, 3]
+            }
+        "#
+    )]
+    #[case(
+        r#"
+        prefix: PREFIX__
+        separator: "__"
+        json: |
+            {
+                "struct": {
+                    "int": 0
+                }
+            }
+        env_vars:
+            PREFIX__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRING: "string"
+        expected: |
+            {
+                "struct": {
+                    "int": 1,
+                    "string": "string"
+                }
+            }
+        "#
+    )]
+    #[case(
+        r#"
+        prefix: PREFIX__
+        separator: "__"
+        json: |
+            {
+                "int": 1,
+                "struct": {
+                    "float": 1.1
+                }
+            }
+        env_vars:
+            PREFIX__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRING: "string"
+            PREFIX__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__BOOL_LIST__1: "false"
+        expected: |
+            {
+                "int": 1,
+                "struct": {
+                    "int": 1,
+                    "float": 1.1,
+                    "string": "string",
+                    "bool_list": [true, false]
+                }
+            }
+    "#
+    )]
+    #[case(
+        r#"
+        prefix: PREFIX__
+        separator: "__"
+        json: |
+            {
+                "float_list": [1.1],
+                "string_list": ["a", "b"],
+                "bool_list": [true, false]
+            }
+        env_vars:
+            PREFIX__INT_LIST__0: "1"
+            PREFIX__INT_LIST__1: "2"
+            PREFIX__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRING: "string"
+            PREFIX__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__STRUCT__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRUCT__STRING: "string"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__BOOL_LIST__3: "true"
+            PREFIX__STRUCT__FLOAT: "1.1"
+            PREFIX__BOOL_LIST__0: "false"
+            PREFIX__STRING_LIST__0: "string0"
+        expected: |
+          {
+            "int_list": [1, 2],
+            "float_list": [1.1],
+            "struct": {
+              "int": 1,
+              "float": 1.1,
+              "string": "string",
+              "bool_list": [true, false],
+              "struct": {
+                "int": 1,
+                "string": "string",
+                "bool_list": [true, false]
+              }
+            },
+            "bool_list": [false, false, null, true],
+            "string_list": ["string0", "b"]
+          }
+    "#
+    )]
+    fn test_parse_iter_with_defeault_json(#[case] test_yaml: &'static str) -> Result<(), Error> {
         let test_case = TestCase::from_yaml(test_yaml);
         let env_vars_to_json = EnvVarsToJson::from(&test_case);
         let actual = env_vars_to_json.parse_iter(test_case.vars())?;
