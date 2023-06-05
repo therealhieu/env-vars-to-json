@@ -1,6 +1,6 @@
 [package]
 name = "env-vars-to-json"
-version = "0.1.0"
+version = "0.1.1"
 authors = [
     "Hieu Minh Nguyen <hieunguyenvn98@gmail.com>"
 ]
