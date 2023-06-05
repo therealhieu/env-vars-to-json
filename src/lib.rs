@@ -635,6 +635,12 @@ mod tests {
         r#"
         prefix: PREFIX__
         separator: "__"
+        json: |
+            {
+                "float_list": [1.1],
+                "string_list": ["a", "b"],
+                "bool_list": [true, false]
+            }
         env_vars:
             PREFIX__INT_LIST__0: "1"
             PREFIX__INT_LIST__1: "2"
@@ -653,6 +659,7 @@ mod tests {
         expected: |
           {
             "int_list": [1, 2],
+            "float_list": [1.1],
             "struct": {
               "int": 1,
               "float": 1.1,
@@ -664,8 +671,8 @@ mod tests {
                 "bool_list": [true, false]
               }
             },
-            "bool_list": [false, null, null, true],
-            "string_list": ["string0"]
+            "bool_list": [false, false, null, true],
+            "string_list": ["string0", "b"]
           }
     "#
     )]
