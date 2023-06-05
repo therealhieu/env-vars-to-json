@@ -22,6 +22,13 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --all-features
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - run: |
+          rustup component add rustfmt
+          cargo fmt --all -- --check
   coverage:
     runs-on: ubuntu-latest
     env:
