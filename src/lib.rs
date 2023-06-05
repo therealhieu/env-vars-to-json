@@ -507,7 +507,7 @@ mod tests {
               }
             },
             "bool_list": [false, null, null, true],
-            "string_list": ["string01"]
+            "string_list": ["string0"]
           }
     "#
     )]
