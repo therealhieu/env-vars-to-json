@@ -17,11 +17,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v1
-      - run: rustup component add clippy
-      - uses: actions-rs/clippy-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features
+      - run: |
+          rustup component add clippy
+          cargo clippy --all --all-targets -- -D warnings
   fmt:
     runs-on: ubuntu-latest
     steps:

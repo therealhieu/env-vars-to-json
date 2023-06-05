@@ -14,9 +14,9 @@ jobs:
         with:
           toolchain: stable
           override: true
-      - name: Publish to Crates.io
-        uses: actions-rs/cargo@v1
+      - name: publish crates
+        uses: katyo/publish-crates@v2
         with:
-          command: publish
-          token: ${{ secrets.CRATES_TOKEN }}
+          registry-token: ${{ secrets.CRATES_TOKEN }}
+        
   
