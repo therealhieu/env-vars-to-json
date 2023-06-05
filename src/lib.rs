@@ -1,9 +1,11 @@
+#![cfg_attr(docsrs, feature(doc_auto_cfg))]
 #![doc = include_str!("../README.md")]
 
 use core::panic;
 use std::env;
 
-use derive_builder::Builder;
+#[cfg(feature = "filter")]
+use regex::Regex;
 use serde_json::{json, Number, Value};
 use thiserror::Error;
 
@@ -29,26 +31,37 @@ impl From<String> for Error {
 }
 
 /// Parse environment variables into json
-#[derive(Debug, Builder)]
-pub struct EnvVarsToJson {
+#[derive(Debug)]
+pub struct Parser {
     /// The prefix to use when parsing environment variables
-    #[builder(default, setter(into, strip_option))]
     pub prefix: Option<String>,
 
     /// The separator to use when parsing environment variables
-    #[builder(default = "String::from(\"__\")", setter(into))]
     pub separator: String,
 
+    #[cfg(feature = "filter")]
+    /// List of regex patterns to include.
+    /// One of the patterns must match for the variable to be included
+    pub include: Vec<Regex>,
+
+    #[cfg(feature = "filter")]
+    /// List of regex patterns to exclude.
+    /// All of the patterns must not match for the variable to be included
+    pub exclude: Vec<Regex>,
+
     /// The json object to merge the parsed environment variables into
-    #[builder(default = "serde_json::json!({})")]
     pub json: Value,
 }
 
-impl Default for EnvVarsToJson {
+impl Default for Parser {
     fn default() -> Self {
         Self {
             prefix: None,
             separator: "__".to_string(),
+            #[cfg(feature = "filter")]
+            include: vec![],
+            #[cfg(feature = "filter")]
+            exclude: vec![],
             json: json!({}),
         }
     }
@@ -137,34 +150,47 @@ impl From<&String> for JsonIndex {
     }
 }
 
-impl EnvVarsToJson {
-    pub fn builder() -> EnvVarsToJsonBuilder {
-        EnvVarsToJsonBuilder::default()
+impl Parser {
+    ///  Return a new parser with the given prefix
+    pub fn with_prefix(mut self, prefix: impl Into<String>) -> Self {
+        self.prefix = Some(prefix.into());
+        self
     }
 
-    /// Examples:
-    ///
-    /// Given environemnt variables, with prefix `PREFIX` and separator `__`:
-    /// ```bash
-    /// export PREFIX__INT_LIST__0=1
-    /// export PREFIX__INT_LIST__1=2
-    /// export PREFIX__STRUCT__INT=1
-    /// export PREFIX__STRUCT__STRING=string
-    /// export PREFIX__STRUCT__BOOL_LIST__0=true
-    /// export PREFIX__STRUCT__BOOL_LIST__1=false
-    /// ```
-    ///
-    /// Ouptut json:
-    /// ```json
-    /// {
-    ///   "int_list": [1, 2],
-    ///   "struct": {
-    ///     "int": 1,'
-    ///     "string": "string",
-    ///     "bool_list": [true, false]
-    ///   }
-    /// }
-    /// ```
+    /// Return a new parser with the given separator
+    pub fn with_separator(mut self, separator: impl Into<String>) -> Self {
+        self.separator = separator.into();
+        self
+    }
+
+    #[cfg(feature = "filter")]
+    /// Return a new parser with the given include patterns
+    /// Requires the `filter` feature
+    pub fn with_include(mut self, include: &[&str]) -> Self {
+        self.include = include
+            .iter()
+            .map(|pattern| Regex::new(pattern).expect("Failed to compile regex"))
+            .collect();
+        self
+    }
+
+    #[cfg(feature = "filter")]
+    /// Return a new parser with the given exclude patterns
+    pub fn with_exclude(mut self, exclude: &[&str]) -> Self {
+        self.exclude = exclude
+            .iter()
+            .map(|pattern| Regex::new(pattern).expect("Failed to compile regex"))
+            .collect();
+        self
+    }
+
+    /// Return a new parser with the given json object
+    pub fn with_json(mut self, json: Value) -> Self {
+        self.json = json;
+        self
+    }
+
+    /// Parse environment variables into json
     pub fn parse_from_env(&self) -> Result<serde_json::Value, Error> {
         self.parse_iter(env::vars())
     }
@@ -175,16 +201,20 @@ impl EnvVarsToJson {
         vars: impl Iterator<Item = (String, String)>,
     ) -> Result<Vec<(String, String)>, Error> {
         let mut vars = if let Some(prefix) = &self.prefix {
-            vars.filter(|(key, _)| key.starts_with(prefix))
-                .map(|(key, value)| {
-                    Ok((
-                        key.strip_prefix(prefix)
-                            .ok_or_else(|| format!("key {key} does not match prefix {prefix}"))?
-                            .to_string(),
-                        value,
-                    ))
-                })
-                .collect::<Result<Vec<_>, Error>>()?
+            let vars = vars.filter(|(key, _)| key.starts_with(prefix));
+
+            #[cfg(feature = "filter")]
+            let vars = vars.filter(|(key, _)| self.is_key_valid(key));
+
+            vars.map(|(key, value)| {
+                Ok((
+                    key.strip_prefix(prefix)
+                        .ok_or_else(|| format!("key {key} does not match prefix {prefix}"))?
+                        .to_string(),
+                    value,
+                ))
+            })
+            .collect::<Result<Vec<_>, Error>>()?
         } else {
             vars.collect::<Vec<_>>()
         };
@@ -193,6 +223,22 @@ impl EnvVarsToJson {
         vars.sort_by(|(key_a, _), (key_b, _)| key_b.cmp(key_a));
 
         Ok(vars)
+    }
+
+    #[cfg(feature = "filter")]
+    /// Check if a key is valid based on the include and exclude regex patterns
+    fn is_key_valid(&self, key: &str) -> bool {
+        // If include is empty, key is valid, else key must match at least one of the patterns
+        if !self.include.is_empty() && !self.include.iter().any(|pattern| pattern.is_match(key)) {
+            return false;
+        }
+
+        // If exclude is empty, key is valid, else key must not match any of the patterns
+        if !self.exclude.is_empty() && self.exclude.iter().any(|pattern| pattern.is_match(key)) {
+            return false;
+        }
+
+        true
     }
 
     /// Parse iterator of String tuples into json
@@ -331,6 +377,14 @@ mod tests {
         prefix: Option<&'a str>,
         separator: &'a str,
         json: Option<String>,
+
+        #[cfg(feature = "filter")]
+        #[serde(default)]
+        include: Vec<&'a str>,
+
+        #[cfg(feature = "filter")]
+        #[serde(default)]
+        exclude: Vec<&'a str>,
         env_vars: HashMap<&'a str, &'a str>,
         expected: String,
     }
@@ -359,20 +413,26 @@ mod tests {
         }
     }
 
-    impl From<&TestCase<'_>> for EnvVarsToJson {
+    impl From<&TestCase<'_>> for Parser {
         fn from(test_case: &TestCase) -> Self {
-            let mut builder = EnvVarsToJson::builder();
-            builder.separator(test_case.separator);
+            let mut parser = Parser::default().with_separator(test_case.separator);
 
             if let Some(prefix) = test_case.prefix {
-                builder.prefix(prefix);
+                parser = parser.with_prefix(prefix);
             }
 
             if let Some(json) = &test_case.json {
-                builder.json(serde_json::from_str(json).expect("failed to parse json"));
+                parser =
+                    parser.with_json(serde_json::from_str(json).expect("failed to parse json"));
             }
 
-            builder.build().expect("failed to build EnvVarsToJson")
+            #[cfg(feature = "filter")]
+            {
+                parser = parser.with_include(&test_case.include);
+                parser = parser.with_exclude(&test_case.exclude);
+            }
+
+            parser
         }
     }
 
@@ -486,7 +546,7 @@ mod tests {
     )]
     fn test_parse_iter(#[case] test_yaml: &'static str) -> Result<(), Error> {
         let test_case = TestCase::from_yaml(test_yaml);
-        let env_vars_to_json = EnvVarsToJson::from(&test_case);
+        let env_vars_to_json = Parser::from(&test_case);
         let actual = env_vars_to_json.parse_iter(test_case.vars())?;
         test_case.assert(&actual);
 
@@ -623,8 +683,154 @@ mod tests {
     )]
     fn test_parse_iter_with_defeault_json(#[case] test_yaml: &'static str) -> Result<(), Error> {
         let test_case = TestCase::from_yaml(test_yaml);
-        let env_vars_to_json = EnvVarsToJson::from(&test_case);
+        let env_vars_to_json = Parser::from(&test_case);
         let actual = env_vars_to_json.parse_iter(test_case.vars())?;
+        dbg!(&actual);
+        test_case.assert(&actual);
+
+        Ok(())
+    }
+
+    #[cfg(feature = "filter")]
+    #[rstest]
+    #[case::with_include(
+        r#"
+        prefix: PREFIX__
+        separator: "__"
+        json: |
+            {
+                "float_list": [1.1],
+                "string_list": ["a", "b"],
+                "bool_list": [true, false]
+            }
+        env_vars:
+            PREFIX__INT_LIST__0: "1"
+            PREFIX__INT_LIST__1: "2"
+            PREFIX__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRING: "string"
+            PREFIX__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__STRUCT__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRUCT__STRING: "string"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__BOOL_LIST__3: "true"
+            PREFIX__STRUCT__FLOAT: "1.1"
+            PREFIX__BOOL_LIST__0: "false"
+            PREFIX__STRING_LIST__0: "string0"
+        include:
+            - ".*INT_LIST.*"
+            - "PREFIX__BOOL_LIST.*"
+        expected: |
+          {
+            "int_list": [1, 2], 
+            "float_list": [1.1],
+            "string_list": ["a", "b"],
+            "bool_list": [false, false, null, true]
+          }
+    "#
+    )]
+    #[case::with_excldue(
+        r#"
+        prefix: PREFIX__
+        separator: "__"
+        json: |
+            {
+                "float_list": [1.1],
+                "string_list": ["a", "b"],
+                "bool_list": [true, false]
+            }
+        env_vars:
+            PREFIX__INT_LIST__0: "1"
+            PREFIX__INT_LIST__1: "2"
+            PREFIX__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRING: "string"
+            PREFIX__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__STRUCT__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRUCT__STRING: "string"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__BOOL_LIST__3: "true"
+            PREFIX__STRUCT__FLOAT: "1.1"
+            PREFIX__BOOL_LIST__0: "false"
+            PREFIX__STRING_LIST__0: "string0"
+        exclude:
+            - ".*INT_LIST.*"
+            - "PREFIX__BOOL_LIST.*"
+        expected: |
+            {
+                "float_list": [1.1],
+                "struct": {
+                  "int": 1,
+                  "float": 1.1,
+                  "string": "string",
+                  "bool_list": [true, false],
+                  "struct": {
+                    "int": 1,
+                    "string": "string",
+                    "bool_list": [true, false]
+                  }
+                },
+                "bool_list": [true, false],
+                "string_list": ["string0", "b"]
+              }
+    "#
+    )]
+    #[case::with_both(
+        r#"
+        prefix: PREFIX__
+        separator: "__"
+        json: |
+            {
+                "float_list": [1.1],
+                "string_list": ["a", "b"],
+                "bool_list": [true, false]
+            }
+        env_vars:
+            PREFIX__INT_LIST__0: "1"
+            PREFIX__INT_LIST__1: "2"
+            PREFIX__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRING: "string"
+            PREFIX__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__STRUCT__STRUCT__INT: "1"
+            PREFIX__STRUCT__STRUCT__STRING: "string"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__0: "true"
+            PREFIX__STRUCT__STRUCT__BOOL_LIST__1: "false"
+            PREFIX__BOOL_LIST__3: "true"
+            PREFIX__STRUCT__FLOAT: "1.1"
+            PREFIX__BOOL_LIST__0: "false"
+            PREFIX__STRING_LIST__0: "string0"
+        include:
+            - ".*STRUCT.*"
+        exclude:
+            - ".*INT_LIST.*"
+            - "PREFIX__BOOL_LIST.*"
+        expected: |
+            {
+                "float_list": [1.1],
+                "struct": {
+                  "int": 1,
+                  "float": 1.1,
+                  "string": "string",
+                  "bool_list": [true, false],
+                  "struct": {
+                    "int": 1,
+                    "string": "string",
+                    "bool_list": [true, false]
+                  }
+                },
+                "bool_list": [true, false],
+                "string_list": ["a", "b"]
+              }
+    "#
+    )]
+    fn test_parse_iter_with_filter(#[case] test_yaml: &'static str) -> Result<(), Error> {
+        let test_case = TestCase::from_yaml(test_yaml);
+        let env_vars_to_json = Parser::from(&test_case);
+        let actual = env_vars_to_json.parse_iter(test_case.vars())?;
+        println!("{}", serde_json::to_string_pretty(&actual).unwrap());
         test_case.assert(&actual);
 
         Ok(())
@@ -679,7 +885,7 @@ mod tests {
     fn test_parse_from_env(#[case] test_yaml: &'static str) -> Result<(), Error> {
         let test_case = TestCase::from_yaml(test_yaml);
         test_case.set_vars();
-        let env_vars_to_json = EnvVarsToJson::from(&test_case);
+        let env_vars_to_json = Parser::from(&test_case);
         let actual = env_vars_to_json.parse_from_env()?;
         println!("{}", serde_json::to_string_pretty(&actual).unwrap());
         test_case.assert(&actual);

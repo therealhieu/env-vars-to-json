@@ -5,7 +5,7 @@
 [![Docs.rs](https://docs.rs/crate_name/badge.svg)](https://docs.rs/env_vars_to_json)
 
 
-This crate provides a method to construct `serde_json::Value` from environment variables.
+This crate provides methods to construct `serde_json::Value` from environment variables.
 
 Examples:
 
@@ -28,83 +28,76 @@ export PREFIX__STRING_LIST__0=string0
 ```
 
 **Without default json**:
-```rust
-use env_vars_to_json::EnvVarsToJson;
+```rust,no_run
+use serde_json::json;
+use env_vars_to_json::Parser;
 
-let json = EnvVarsToJson::builder()
-    .prefix("PREFIX")
-    .separator("__")
-    .build()
-    .expect("Failed to build EnvVarsToJson")
+let json = Parser::default()
+    .with_prefix("PREFIX")
+    .with_separator("__")
     .parse_from_env()
     .expect("Failed to parse environment variables");
 
-println!("{}", serde_json::to_string_pretty(&json).unwrap());
-```
-
-Ouptut json:
-```json
-{
-  "int_list": [1, 2],
-  "struct": {
-    "int": 1,
-    "float": 1.1,
-    "string": "string",
-    "bool_list": [true, false],
+assert_eq!(json, json!(
+  {
+    "int_list": [1, 2],
     "struct": {
       "int": 1,
+      "float": 1.1,
       "string": "string",
-      "bool_list": [true, false]
-    }
-  },
-  "bool_list": [false, null, null, true],
-  "string_list": ["string0"]
-}
+      "bool_list": [true, false],
+      "struct": {
+        "int": 1,
+        "string": "string",
+        "bool_list": [true, false]
+      }
+    },
+    "bool_list": [false, null, null, true],
+    "string_list": ["string0"]
+  }
+))
 ```
 
-**With default json**:
-```rust
+**With default json and filters (require feature `filter` enabled)**:
+```rust,feature=filter,no_run
 use serde_json::json;
-use env_vars_to_json::EnvVarsToJson;
+use env_vars_to_json::Parser;
 
-let json = EnvVarsToJson::builder()
-    .prefix("PREFIX")
-    .separator("__")
-    .json(json!(
+let json = Parser::default()
+    .with_prefix("PREFIX")
+    .with_separator("__")
+    .with_include(&[".*STRUCT.*"])
+    .with_exclude(&[".*INT_LIST.*", "PREFIX__BOOL_LIST.*"])
+    .with_json(json!(
         {
           "float_list": [1.1],
           "string_list": ["a", "b"],
           "bool_list": [true, false]
         }
     ))
-    .build()
-    .expect("Failed to build EnvVarsToJson")
     .parse_from_env()
     .expect("Failed to parse environment variables");
 
-println!("{}", serde_json::to_string_pretty(&json).unwrap());
+assert_eq!(json, json!(
+  {
+      "float_list": [1.1],
+      "struct": {
+        "int": 1,
+        "float": 1.1,
+        "string": "string",
+        "bool_list": [true, false],
+        "struct": {
+          "int": 1,
+          "string": "string",
+          "bool_list": [true, false]
+        }
+      },
+      "bool_list": [true, false],
+      "string_list": ["a", "b"]
+    }  
+));
 ```
 
-Output:
-```json
-{
-  "int_list": [1, 2],
-  "float_list": [1.1],
-  "struct": {
-    "int": 1,
-    "float": 1.1,
-    "string": "string",
-    "bool_list": [true, false],
-    "struct": {
-      "int": 1,
-      "string": "string",
-      "bool_list": [true, false]
-    }
-  },
-  "bool_list": [false, false, null, true],
-  "string_list": ["string0", "b"]
-}
-```
 
 ## License
 Licensed under either of
@@ -112,3 +105,5 @@ Licensed under either of
    ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0)>
  * MIT license
    ([LICENSE-MIT](LICENE-MIT) or <http://opensource.org/licenses/MIT)>
+
+at your option.

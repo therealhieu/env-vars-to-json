@@ -27,6 +27,12 @@ jobs:
       - run: |
           rustup component add rustfmt
           cargo fmt --all -- --check
+  doctest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+      - run: |
+          cargo test --doc --all-features
   coverage:
     runs-on: ubuntu-latest
     env:
