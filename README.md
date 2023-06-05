@@ -27,6 +27,21 @@ export PREFIX__BOOL_LIST__0=false
 export PREFIX__STRING_LIST__0=string0
 ```
 
+**Without default json**:
+```rust
+use env_vars_to_json::EnvVarsToJson;
+
+let json = EnvVarsToJson::builder()
+    .prefix("PREFIX")
+    .separator("__")
+    .build()
+    .expect("Failed to build EnvVarsToJson")
+    .parse_from_env()
+    .expect("Failed to parse environment variables");
+
+println!("{}", serde_json::to_string_pretty(&json).unwrap());
+```
+
 Ouptut json:
 ```json
 {
@@ -47,19 +62,48 @@ Ouptut json:
 }
 ```
 
-Code:
+**With default json**:
 ```rust
+use serde_json::json;
 use env_vars_to_json::EnvVarsToJson;
 
 let json = EnvVarsToJson::builder()
     .prefix("PREFIX")
     .separator("__")
+    .json(json!(
+        {
+          "float_list": [1.1],
+          "string_list": ["a", "b"],
+          "bool_list": [true, false]
+        }
+    ))
     .build()
     .expect("Failed to build EnvVarsToJson")
     .parse_from_env()
     .expect("Failed to parse environment variables");
 
-println!("{}", json);
+println!("{}", serde_json::to_string_pretty(&json).unwrap());
+```
+
+Output:
+```json
+{
+  "int_list": [1, 2],
+  "float_list": [1.1],
+  "struct": {
+    "int": 1,
+    "float": 1.1,
+    "string": "string",
+    "bool_list": [true, false],
+    "struct": {
+      "int": 1,
+      "string": "string",
+      "bool_list": [true, false]
+    }
+  },
+  "bool_list": [false, false, null, true],
+  "string_list": ["string0", "b"]
+}
 ```
 
 ## License
