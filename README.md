@@ -59,7 +59,7 @@ assert_eq!(json, json!(
 ```
 
 **With default json and filters (require feature `filter` enabled)**:
-```rust,feature=filter,no_run
+```rust,no_run
 use serde_json::json;
 use env_vars_to_json::Parser;
 
