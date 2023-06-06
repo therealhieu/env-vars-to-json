@@ -98,6 +98,8 @@ assert_eq!(json, json!(
 ));
 ```
 
+More examples can be found in [test cases](src/lib.rs#L367).
+
 
 ## License
 Licensed under either of
